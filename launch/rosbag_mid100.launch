@@ -15,7 +15,7 @@
      <remap from="/laser_points_2" to="/livox/lidar_1LVDG1S006J5GZ3" />
     </node>
 
-    <node pkg="loam_livox" type="livox_laserMapping" name="livox_laserMapping" output="screen" />
+    <node pkg="loam_livox" type="livox_laserMapping" name="livox_laserMapping" output="screen"/>
 
     <arg name="rviz" default="true" />
     <group if="$(arg rviz)">

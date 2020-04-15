@@ -88,26 +88,26 @@ using namespace Common_tools;
 
 struct Data_pair
 {
-    sensor_msgs::PointCloud2ConstPtr m_pc_corner;
-    sensor_msgs::PointCloud2ConstPtr m_pc_full;
-    sensor_msgs::PointCloud2ConstPtr m_pc_plane;
+    sensor_msgs::PointCloud2 m_pc_corner;
+    sensor_msgs::PointCloud2 m_pc_full;
+    sensor_msgs::PointCloud2 m_pc_plane;
     bool                             m_has_pc_corner = 0;
     bool                             m_has_pc_full = 0;
     bool                             m_has_pc_plane = 0;
 
-    void add_pc_corner( sensor_msgs::PointCloud2ConstPtr ros_pc )
+    void add_pc_corner(const sensor_msgs::PointCloud2& ros_pc )
     {
         m_pc_corner = ros_pc;
         m_has_pc_corner = true;
     }
 
-    void add_pc_plane( sensor_msgs::PointCloud2ConstPtr ros_pc )
+    void add_pc_plane(const sensor_msgs::PointCloud2& ros_pc )
     {
         m_pc_plane = ros_pc;
         m_has_pc_plane = true;
     }
 
-    void add_pc_full( sensor_msgs::PointCloud2ConstPtr ros_pc )
+    void add_pc_full(const sensor_msgs::PointCloud2& ros_pc )
     {
         m_pc_full = ros_pc;
         m_has_pc_full = true;
@@ -115,6 +115,7 @@ struct Data_pair
 
     bool is_completed()
     {
+        std::cout<<" "<< m_has_pc_corner<<" "<< m_has_pc_full<<" "<< m_has_pc_plane<<std::endl;
         return ( m_has_pc_corner & m_has_pc_full & m_has_pc_plane );
     }
 };
@@ -212,8 +213,9 @@ class Laser_mapping
     Eigen::Map<Eigen::Quaterniond> m_q_w_last = Eigen::Map<Eigen::Quaterniond>( m_para_buffer_RT_last );
     Eigen::Map<Eigen::Vector3d>    m_t_w_last = Eigen::Map<Eigen::Vector3d>( m_para_buffer_RT_last + 4 );
 
-    std::map<double, Data_pair *> m_map_data_pair;
-    std::queue<Data_pair *> m_queue_avail_data;
+    //std::map<double, Data_pair *> m_map_data_pair;
+    std::map<double, Data_pair> m_map_data_pair;
+    std::queue<Data_pair> m_queue_avail_data;
 
     std::queue<nav_msgs::Odometry::ConstPtr> m_odom_que;
     std::mutex                               m_mutex_buf;
@@ -293,7 +295,7 @@ class Laser_mapping
     int   m_loop_closure_map_alignment_maximum_icp_iteration;
     int   m_loop_closure_map_alignment_if_dump_matching_result;
     int   m_loop_closure_maximum_keyframe_in_wating_list;
-    
+
     float m_loop_closure_minimum_similarity_linear;
     float m_loop_closure_minimum_similarity_planar;
     float m_loop_closure_map_alignment_resolution;
@@ -474,7 +476,7 @@ class Laser_mapping
             pcl::VoxelGrid<PointType>                              down_sample_filter_surface = m_down_sample_filter_surface;
             std::vector<Points_cloud_map<float>::Mapping_cell_ptr> corner_cell_vec = m_pt_cell_map_corners.find_cells_in_radius( m_t_w_curr, m_maximum_search_range_corner );
             std::vector<Points_cloud_map<float>::Mapping_cell_ptr> plane_cell_vec = m_pt_cell_map_planes.find_cells_in_radius( m_t_w_curr, m_maximum_search_range_surface );
-       
+
             int                        corner_cell_numbers_in_fov = 0;
             int                        surface_cell_numbers_in_fov = 0;
             pcl::PointCloud<PointType> pc_temp;
@@ -613,7 +615,7 @@ class Laser_mapping
         m_pub_odom_aft_mapped_hight_frec = m_ros_node_handle.advertise<nav_msgs::Odometry>( "/aft_mapped_to_init_high_frec", 10000 );
         m_pub_laser_aft_mapped_path = m_ros_node_handle.advertise<nav_msgs::Path>( "/aft_mapped_path", 10000 );
         m_pub_laser_aft_loopclosure_path = m_ros_node_handle.advertise<nav_msgs::Path>( "/aft_loopclosure_path", 10000 );
-        
+
         m_pt_cell_map_full.set_resolution( m_pt_cell_resolution );
         m_pt_cell_map_full.m_minimum_revisit_threshold = m_para_threshold_cell_revisit;
 
@@ -630,20 +632,20 @@ class Laser_mapping
 
     ~Laser_mapping(){};
 
-    Data_pair *get_data_pair( const double &time_stamp )
-    {
-        std::map<double, Data_pair *>::iterator it = m_map_data_pair.find( time_stamp );
-        if ( it == m_map_data_pair.end() )
-        {
-            Data_pair *date_pair_ptr = new Data_pair();
-            m_map_data_pair.insert( std::make_pair( time_stamp, date_pair_ptr ) );
-            return date_pair_ptr;
-        }
-        else
-        {
-            return it->second;
-        }
-    }
+//    Data_pair *get_data_pair( const double &time_stamp )
+//    {
+//        std::map<double, Data_pair *>::iterator it = m_map_data_pair.find( time_stamp );
+//        if ( it == m_map_data_pair.end() )
+//        {
+//            Data_pair *date_pair_ptr = new Data_pair();
+//            m_map_data_pair.insert( std::make_pair( time_stamp, date_pair_ptr ) );
+//            return date_pair_ptr;
+//        }
+//        else
+//        {
+//            return it->second;
+//        }
+//    }
 
     template <typename T>
     T get_ros_parameter( ros::NodeHandle &nh, const std::string parameter_name, T &parameter, T default_val )
@@ -749,33 +751,82 @@ class Laser_mapping
     void laserCloudCornerLastHandler( const sensor_msgs::PointCloud2ConstPtr &laserCloudCornerLast2 )
     {
         std::unique_lock<std::mutex> lock( m_mutex_buf );
-        Data_pair *                  data_pair = get_data_pair( laserCloudCornerLast2->header.stamp.toSec() );
-        data_pair->add_pc_corner( laserCloudCornerLast2 );
-        if ( data_pair->is_completed() )
+        double time = laserCloudCornerLast2->header.stamp.toSec();
+        //std::cout<<"time1: "<<time<<std::endl;
+        std::map<double, Data_pair>::iterator it = m_map_data_pair.find(time);
+        if ( it == m_map_data_pair.end() )
         {
-            m_queue_avail_data.push( data_pair );
+            Data_pair one_date_pair;
+            one_date_pair.add_pc_corner(*laserCloudCornerLast2);
+            m_map_data_pair.insert( std::make_pair(time, one_date_pair));
+            //std::cout<<"data_pair->insert 1 "<<m_map_data_pair.size()<<std::endl;
+        }
+        else
+        {
+            it->second.add_pc_corner(*laserCloudCornerLast2);
+            //std::cout<<"data_pair->add_pc_corner1 "<<m_map_data_pair.size()<<std::endl;
+        }
+
+        if ( m_map_data_pair[time].is_completed() )
+        {
+            //std::cout<<"push1"<<m_queue_avail_data.size()<<std::endl;
+            m_queue_avail_data.push(m_map_data_pair[time]);
+            m_map_data_pair.erase(time);
         }
     }
 
     void laserCloudSurfLastHandler( const sensor_msgs::PointCloud2ConstPtr &laserCloudSurfLast2 )
     {
         std::unique_lock<std::mutex> lock( m_mutex_buf );
-        Data_pair *                  data_pair = get_data_pair( laserCloudSurfLast2->header.stamp.toSec() );
-        data_pair->add_pc_plane( laserCloudSurfLast2 );
-        if ( data_pair->is_completed() )
+        double time = laserCloudSurfLast2->header.stamp.toSec();
+        //std::cout<<"time2: "<<time<<std::endl;
+        std::map<double, Data_pair>::iterator it = m_map_data_pair.find(time);
+        if ( it == m_map_data_pair.end() )
         {
-            m_queue_avail_data.push( data_pair );
+            Data_pair one_date_pair;
+            one_date_pair.add_pc_plane(*laserCloudSurfLast2);
+            m_map_data_pair.insert( std::make_pair(time, one_date_pair));
+            //std::cout<<"data_pair->insert 2 "<<m_map_data_pair.size()<<std::endl;
         }
+        else
+        {
+            it->second.add_pc_plane(*laserCloudSurfLast2);
+            //std::cout<<"data_pair->add_pc_corner2 "<<m_map_data_pair.size()<<std::endl;
+        }
+
+        if ( m_map_data_pair[time].is_completed() )
+        {
+            //std::cout<<"push2"<<m_queue_avail_data.size()<<std::endl;
+            m_queue_avail_data.push(m_map_data_pair[time]);
+            m_map_data_pair.erase(time);
+        }
+
     }
 
     void laserCloudFullResHandler( const sensor_msgs::PointCloud2ConstPtr &laserCloudFullRes2 )
     {
         std::unique_lock<std::mutex> lock( m_mutex_buf );
-        Data_pair *                  data_pair = get_data_pair( laserCloudFullRes2->header.stamp.toSec() );
-        data_pair->add_pc_full( laserCloudFullRes2 );
-        if ( data_pair->is_completed() )
+        double time = laserCloudFullRes2->header.stamp.toSec();
+        //std::cout<<"time3: "<<time<<std::endl;
+        std::map<double, Data_pair>::iterator it = m_map_data_pair.find(time);
+        if ( it == m_map_data_pair.end() )
         {
-            m_queue_avail_data.push( data_pair );
+            Data_pair one_date_pair;
+            one_date_pair.add_pc_full(*laserCloudFullRes2);
+            m_map_data_pair.insert( std::make_pair(time, one_date_pair));
+            //std::cout<<"data_pair->insert 3 "<<m_map_data_pair.size()<<std::endl;
+        }
+        else
+        {
+            it->second.add_pc_full(*laserCloudFullRes2);
+            //std::cout<<"data_pair->add_pc_corner3 "<<m_map_data_pair.size()<<std::endl;
+        }
+
+        if ( m_map_data_pair[time].is_completed() )
+        {
+            //std::cout<<"push3"<<m_queue_avail_data.size()<<std::endl;
+            m_queue_avail_data.push(m_map_data_pair[time]);
+            m_map_data_pair.erase(time);
         }
     }
 
@@ -863,10 +914,10 @@ class Laser_mapping
             pose_stamp.pose.position.z = pose_3d.p( 2 );
 
             pose_stamp.header.frame_id = "camera_init";
-            
+
             m_laser_after_loopclosure_path.poses.push_back( pose_stamp );
         }
-        
+
         m_pub_laser_aft_loopclosure_path.publish( m_laser_after_loopclosure_path );
     }
 
@@ -901,11 +952,11 @@ class Laser_mapping
         pcd_saver.set_save_dir_name( std::string( m_loop_save_dir_name ).append( "/pcd" ) );
         map_rfn.set_save_dir( std::string( m_loop_save_dir_name ).append( "/mapping_refined" ) );
         map_rfn.set_down_sample_resolution( 0.2 );
-        
+
         std::map<int, pcl::PointCloud<PointType>> map_id_pc;
         int                                       if_end = 0;
         pcl::VoxelGrid<PointType>                 down_sample_filter;
-                
+
         m_logger_loop_closure.set_log_dir(m_log_save_dir_name);
         m_logger_loop_closure.init( "loop_closure.log" );
 
@@ -920,7 +971,7 @@ class Laser_mapping
             {
                 continue;
             }
-            
+
             m_timer.tic( "New keyframe" );
             q_curr = m_keyframe_need_precession_list.front()->m_pose_q;
             t_curr = m_keyframe_need_precession_list.front()->m_pose_t;
@@ -947,18 +998,18 @@ class Laser_mapping
 
             pose3d_vec.push_back( Ceres_pose_graph_3d::Pose3d( q_curr, t_curr ) );
             pose3d_map.insert( std::make_pair( pose3d_map.size(), Ceres_pose_graph_3d::Pose3d( q_curr, t_curr ) ) );
-            
+
             if ( pose3d_vec.size() >= 2 )
             {
                 Ceres_pose_graph_3d::Constraint3d temp_csn;
                 Eigen::Vector3d                   relative_T = pose3d_vec[ pose3d_vec.size() - 2 ].q.inverse() * ( t_curr - pose3d_vec[ pose3d_vec.size() - 2 ].p );
                 Eigen::Quaterniond                relative_Q = pose3d_vec[ pose3d_vec.size() - 2 ].q.inverse() * q_curr;
-                
+
                 temp_csn = Ceres_pose_graph_3d::Constraint3d( pose3d_vec.size() - 2, pose3d_vec.size() - 1,
                                                               relative_Q, relative_T );
                 constrain_vec.push_back( temp_csn );
             }
-            
+
             // Save pose
             json_file_name = std::string( m_loop_save_dir_name ).append( "/pose_" ).append( std::to_string( curren_frame_idx ) ).append( ".json" );
             dump_pose_and_regerror( json_file_name, q_curr, t_curr, reg_error_his );
@@ -1008,7 +1059,7 @@ class Laser_mapping
 
                 sim_plane_res = last_keyframe->max_similiarity_of_two_image( last_keyframe->m_feature_img_plane, keyframe_vec[ his ]->m_feature_img_plane );
                 sim_line_res = last_keyframe->max_similiarity_of_two_image( last_keyframe->m_feature_img_line, keyframe_vec[ his ]->m_feature_img_line );
-                
+
                 if ( ( ( sim_line_res > m_loop_closure_minimum_similarity_linear ) && ( sim_plane_res > 0.92 ) ) ||
                      ( sim_plane_res > m_loop_closure_minimum_similarity_planar ) )
                 {
@@ -1019,7 +1070,7 @@ class Laser_mapping
                         if ( ( ( sim_plane_res_roi > m_loop_closure_minimum_similarity_linear ) && ( sim_plane_res > 0.92 ) ) ||
                              ( sim_line_res_roi > m_loop_closure_minimum_similarity_planar ) )
                         {
-                            m_logger_loop_closure.printf( "Range in roi check pass\r\n"); 
+                            m_logger_loop_closure.printf( "Range in roi check pass\r\n");
                         }
                         else
                         {
@@ -1034,17 +1085,17 @@ class Laser_mapping
                     m_scene_align.set_downsample_resolution( m_loop_closure_map_alignment_resolution, m_loop_closure_map_alignment_resolution );
                     m_scene_align.m_para_scene_alignments_maximum_residual_block = m_para_scene_alignments_maximum_residual_block;
                     double icp_score = m_scene_align.find_tranfrom_of_two_mappings( last_keyframe, keyframe_vec[ his ], m_loop_closure_map_alignment_if_dump_matching_result );
-                    
+
                     screen_printf( "===============================================\r\n" );
                     screen_printf( "%s -- %s\r\n", m_filename_vec[ keyframe_vec.size() - 1 ].c_str(), m_filename_vec[ his ].c_str() );
                     screen_printf( "ICP inlier threshold = %lf, %lf\r\n", icp_score, m_scene_align.m_pc_reg.m_inlier_threshold );
                     screen_printf( "%s\r\n", m_scene_align.m_pc_reg.m_final_opt_summary.BriefReport().c_str() );
-                    
+
                     m_logger_loop_closure.printf( "===============================================\r\n" );
                     m_logger_loop_closure.printf( "%s -- %s\r\n", m_filename_vec[ keyframe_vec.size() - 1 ].c_str(), m_filename_vec[ his ].c_str() );
                     m_logger_loop_closure.printf( "ICP inlier threshold = %lf, %lf\r\n", icp_score, m_scene_align.m_pc_reg.m_inlier_threshold );
                     m_logger_loop_closure.printf( "%s\r\n", m_scene_align.m_pc_reg.m_final_opt_summary.BriefReport().c_str() );
-                    
+
                     if ( m_scene_align.m_pc_reg.m_inlier_threshold > m_loop_closure_map_alignment_inlier_threshold*2 )
                     {
                         his += 10;
@@ -1129,7 +1180,7 @@ class Laser_mapping
             screen_out << m_timer.toc_string( "Find loop" ) << std::endl;
 
             m_scene_align.dump_file_name( std::string( m_loop_save_dir_name ).append( "/file_name.txt" ), map_file_name );
-            
+
             if ( 1 )
             {
 
@@ -1415,7 +1466,7 @@ class Laser_mapping
             return 0;
         }
         m_timer.tic( "Add new frame" );
-        
+
         PointType pointOri, pointSel;
         pcl::PointCloud<PointType>::Ptr pc_new_feature_corners( new pcl::PointCloud<PointType>() );
         pcl::PointCloud<PointType>::Ptr pc_new_feature_surface( new pcl::PointCloud<PointType>() );
@@ -1534,10 +1585,10 @@ class Laser_mapping
             if ( m_keyframe_of_updating_list.front()->m_accumulate_frames >= ( size_t ) m_para_scans_of_each_keyframe )
             {
                 m_keyframe_of_updating_list.front()->m_ending_frame_idx = m_current_frame_index;
-                
+
                 m_keyframe_of_updating_list.front()->m_pose_q = m_q_w_curr;
                 m_keyframe_of_updating_list.front()->m_pose_t =  m_t_w_curr;
-                
+
                 m_keyframe_need_precession_list.push_back( m_keyframe_of_updating_list.front() );
                 m_keyframe_of_updating_list.pop_front();
             }
@@ -1545,8 +1596,8 @@ class Laser_mapping
             if ( m_keyframe_of_updating_list.back()->m_accumulate_frames >= ( size_t ) m_para_scans_between_two_keyframe )
             {
                 m_mutex_dump_full_history.lock();
-                
-                
+
+
                 for ( auto it = m_laser_cloud_full_history.begin(); it != m_laser_cloud_full_history.end(); it++ )
                 {
                     m_keyframe_of_updating_list.back()->m_accumulated_point_cloud += ( *it );
@@ -1616,7 +1667,7 @@ class Laser_mapping
         odomAftMapped.header.frame_id = "camera_init";
         odomAftMapped.child_frame_id = "aft_mapped";
         odomAftMapped.header.stamp = ros::Time().fromSec( time_odom );
-        
+
         odomAftMapped.pose.pose.orientation.x = m_q_w_curr.x();
         odomAftMapped.pose.pose.orientation.y = m_q_w_curr.y();
         odomAftMapped.pose.pose.orientation.z = m_q_w_curr.z();
@@ -1688,7 +1739,6 @@ class Laser_mapping
 
         while ( 1 )
         {
-
             //printf_line;
             m_logger_common.printf( "------------------\r\n" );
             m_logger_timer.printf( "------------------\r\n" );
@@ -1699,20 +1749,21 @@ class Laser_mapping
                 sleep( 0.0001 );
             }
             m_mutex_buf.lock();
+            std::cout<<"after sleep:  "<<m_queue_avail_data.size()<<std::endl;
             while ( m_queue_avail_data.size() >= ( unsigned int ) m_max_buffer_size )
             {
                 ROS_WARN( "Drop lidar frame in mapping for real time performance !!!" );
                 ( *m_logger_common.get_ostream() ) << "Drop lidar frame in mapping for real time performance !!!" << endl;
                 m_queue_avail_data.pop();
             }
-
-            Data_pair *current_data_pair = m_queue_avail_data.front();
+            std::cout<<"m_queue_avail_data:  "<<m_queue_avail_data.size()<<std::endl;
+            Data_pair current_data_pair = m_queue_avail_data.front();
             m_queue_avail_data.pop();
             m_mutex_buf.unlock();
 
             m_timer.tic( "Prepare to enter thread" );
 
-            m_time_pc_corner_past = current_data_pair->m_pc_corner->header.stamp.toSec();
+            m_time_pc_corner_past = current_data_pair.m_pc_corner.header.stamp.toSec();
 
             if ( first_time_stamp < 0 )
             {
@@ -1723,16 +1774,16 @@ class Laser_mapping
 
             m_mutex_querypointcloud.lock();
             m_laser_cloud_corner_last->clear();
-            pcl::fromROSMsg( *( current_data_pair->m_pc_corner ), *m_laser_cloud_corner_last );
+            pcl::fromROSMsg( ( current_data_pair.m_pc_corner ), *m_laser_cloud_corner_last );
 
             m_laser_cloud_surf_last->clear();
-            pcl::fromROSMsg( *( current_data_pair->m_pc_plane ), *m_laser_cloud_surf_last );
+            pcl::fromROSMsg( ( current_data_pair.m_pc_plane ), *m_laser_cloud_surf_last );
 
             m_laser_cloud_full_res->clear();
-            pcl::fromROSMsg( *( current_data_pair->m_pc_full ), *m_laser_cloud_full_res );
+            pcl::fromROSMsg( ( current_data_pair.m_pc_full ), *m_laser_cloud_full_res );
             m_mutex_querypointcloud.unlock();
 
-            delete current_data_pair;
+            //delete current_data_pair;
 
             Common_tools::maintain_maximum_thread_pool<std::future<int> *>( m_thread_pool, m_maximum_parallel_thread );
 
